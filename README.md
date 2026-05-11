@@ -78,7 +78,7 @@ The faded corner box also has a **⏸ Pause Mic** button for when you need to mu
 | Feature | What it does |
 |---|---|
 | **Auto Expressions** | Mic onset detection picks an eye expression per phrase, weighted by your **Mood** (Happy / Calm / Mad / Shocked) and your speaking volume. |
-| **Lip Sync** | Four mouth shapes mapped to volume tiers. Three styles: Default (Ehh), Smiley, and Hissy (Sss/Rrr). |
+| **Lip Sync** | Four-tier mic volume → mouth file. Two styles: Default (Ehh — neutral closed mouth on silence) and Smiley (smiles on silence). |
 | **Auto Blink** | Periodic blink on a slider (1–12s). Also fires automatically before each new expression and during long silences. |
 | **Green Screen** | Draws `Fox Green.png` as the top layer so OBS Chroma Key can cut out the background. |
 | **Manual Test** | 7-button grid to lock the fox to a specific expression for testing or screenshots. Auto-mode overrides as soon as you speak. |
@@ -93,13 +93,13 @@ The faded corner box also has a **⏸ Pause Mic** button for when you need to mu
 - `Fox Green.png` — green-screen variant base
 
 **Mouth shapes (lip sync)**
-- `Fox Mmm.png` (silent / closed)
+- `Fox Mmm.png` (silent — default style)
+- `Fox Smile.png` (silent — smiley style)
 - `Fox Eee.png` (quiet)
-- `Fox Ehh.png` (mid — default style)
-- `Fox Smile.png` (mid — smiley style)
-- `Fox Sss.png` (quiet — hissy style)
-- `Fox Rrr.png` (mid — hissy style)
-- `Fox Ahh.png` (loud — all styles)
+- `Fox Ehh.png` (mid)
+- `Fox Ahh.png` (loud)
+
+*Fox Sss.png and Fox Rrr.png are not used by the current lip-sync map — they can stay in the assets folder unused.*
 
 **Eye expressions**
 - `Fox Stare.png` (idle / default)
