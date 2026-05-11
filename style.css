@@ -267,9 +267,6 @@ body::after {
   box-shadow: inset 0 0 30px rgba(255,214,10,0.04);
   z-index: 2;
 }
-.canvas-frame.green-bg {
-  background: #00ff00;
-}
 #previewCanvas {
   position: absolute; inset: 0;
   width: 100%; height: 100%;
@@ -626,7 +623,6 @@ input[type=range]:active::-webkit-slider-thumb { cursor: grabbing; }
   justify-content: center;
   background: transparent;
 }
-.obs-mode.green-bg { background: #00ff00; }
 body.obs-active .obs-mode { display: flex; }
 body.obs-active .header,
 body.obs-active .main { display: none; }
