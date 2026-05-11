@@ -200,8 +200,7 @@ function render() {
   const w = canvas.width, h = canvas.height;
   ctx.clearRect(0, 0, w, h);
 
-  const baseFile = liveState.greenScreen ? BASE_GREEN : BASE;
-  const baseImg = IMG[baseFile];
+  const baseImg = IMG[BASE];
   if (baseImg) ctx.drawImage(baseImg, 0, 0, w, h);
 
   const mouthImg = IMG[getMouthFile()];
@@ -209,6 +208,12 @@ function render() {
 
   const eyeImg = IMG[getEyeFile()];
   if (eyeImg) ctx.drawImage(eyeImg, 0, 0, w, h);
+
+  // Green screen overlay — top layer when enabled
+  if (liveState.greenScreen) {
+    const greenImg = IMG[BASE_GREEN];
+    if (greenImg) ctx.drawImage(greenImg, 0, 0, w, h);
+  }
 }
 
 // ── Mic + main loop ───────────────────────────────────────────────────────
