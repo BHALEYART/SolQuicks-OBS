@@ -7,7 +7,6 @@
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
   html, body { width:100%; height:100%; overflow:hidden; background:transparent; }
-  body.green { background:#00ff00; }
   canvas {
     display:block;
     position:absolute;
@@ -64,7 +63,7 @@ const liveState = {
   mood: 'happy',
   lipSync: true,
   syncStyle: 'ehh',
-  autoBlink: true,
+  autoBlink: false,
   blinkIntervalSec: 4,
   greenScreen: false,
   manualExpression: null,
@@ -83,7 +82,6 @@ const ch = new BroadcastChannel('solquicks-live');
 ch.onmessage = ({ data }) => {
   if (data.type === 'state' && data.state) {
     Object.assign(liveState, data.state);
-    document.body.classList.toggle('green', liveState.greenScreen);
   }
 };
 
@@ -201,11 +199,6 @@ const ctx = canvas.getContext('2d');
 function render() {
   const w = canvas.width, h = canvas.height;
   ctx.clearRect(0, 0, w, h);
-
-  if (liveState.greenScreen) {
-    ctx.fillStyle = '#00ff00';
-    ctx.fillRect(0, 0, w, h);
-  }
 
   const baseFile = liveState.greenScreen ? BASE_GREEN : BASE;
   const baseImg = IMG[baseFile];
