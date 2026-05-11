@@ -106,8 +106,8 @@
       <div class="group-hd">Auto Blink</div>
       <div class="row">
         <label>Auto Blink</label>
-        <div class="switch on" id="blinkSwitch" onclick="toggleSwitch('blink')">
-          <input type="checkbox" id="blinkToggle" checked/>
+        <div class="switch" id="blinkSwitch" onclick="toggleSwitch('blink')">
+          <input type="checkbox" id="blinkToggle"/>
         </div>
       </div>
       <div class="row">
@@ -133,7 +133,7 @@
           <input type="checkbox" id="greenToggle"/>
         </div>
       </div>
-      <div class="help">Green Screen swaps the base for <strong style="color:var(--fox)">Fox Green.png</strong> and tints the OBS-mode background <span style="color:#0f0;">#00FF00</span> for OBS Chroma Key.</div>
+      <div class="help">Green Screen swaps the base layer to <strong style="color:var(--yellow)">Fox Green.png</strong> so OBS Chroma Key can cut out the background.</div>
     </div>
 
     <!-- OBS Setup -->
@@ -229,7 +229,7 @@ const state = {
   mood: 'happy',
   lipSync: true,
   syncStyle: 'ehh',
-  autoBlink: true,
+  autoBlink: false,
   blinkIntervalSec: 4,
   greenScreen: false,
   manualExpression: null,   // null = auto, otherwise eye key like 'Joy'
@@ -292,12 +292,6 @@ function getEyeFile() {
 
 function drawFrame(ctx, w, h) {
   ctx.clearRect(0, 0, w, h);
-
-  // Optional green fill behind everything when green-screen mode is on
-  if (state.greenScreen) {
-    ctx.fillStyle = '#00ff00';
-    ctx.fillRect(0, 0, w, h);
-  }
 
   // Base layer — Fox Green.png if green screen, otherwise Fox Base 1.png
   const baseFile = state.greenScreen ? BASE_GREEN : BASE;
@@ -535,8 +529,6 @@ function toggleSwitch(key) {
     state.greenScreen = !state.greenScreen;
     document.getElementById('greenSwitch').classList.toggle('on', state.greenScreen);
     document.getElementById('greenToggle').checked = state.greenScreen;
-    document.getElementById('canvasFrame').classList.toggle('green-bg', state.greenScreen);
-    document.getElementById('obsMode').classList.toggle('green-bg', state.greenScreen);
   }
   broadcastState();
 }
