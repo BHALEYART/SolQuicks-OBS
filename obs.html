@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>SolQuicks Live — OBS</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html, body { width:100%; height:100%; overflow:hidden; background:transparent; }
+  body.green { background:#00ff00; }
+  canvas {
+    display:block;
+    position:absolute;
+    top:50%; left:50%;
+    transform:translate(-50%, -50%);
+    width: min(100vw, 100vh);
+    height: min(100vw, 100vh);
+  }
+</style>
+</head>
+<body>
+<canvas id="c" width="1000" height="1000"></canvas>
+<script>
+// ═══════════════════════════════════════════════════════════════════════════
+//  SolQuicks Live — OBS Browser Source
+//
+//  Add this URL in OBS → Sources → + → Browser Source
+//  Set Width/Height to match your desired output (e.g. 1000×1000)
+//  Check "Shutdown source when not visible" for performance
+//  Add a Chroma Key filter (green) if Green Screen is enabled
+//
+//  This page runs its own mic and receives config from the control panel
+//  (index.html) via BroadcastChannel: name 'solquicks-live'.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const ASSET_BASE = './assets/';
+
+const BASE       = 'Fox Base 1.png';
+const BASE_GREEN = 'Fox Green.png';
+
+const MOUTHS = {
+  ehh:   { silent:'Fox Mmm.png',   quiet:'Fox Eee.png',  mid:'Fox Ehh.png',   loud:'Fox Ahh.png' },
+  smile: { silent:'Fox Smile.png', quiet:'Fox Eee.png',  mid:'Fox Smile.png', loud:'Fox Ahh.png' },
+  sss:   { silent:'Fox Mmm.png',   quiet:'Fox Sss.png',  mid:'Fox Rrr.png',   loud:'Fox Ahh.png' },
+};
+const EYE_FILES = {
+  Blink:    'Fox Blink.png',
+  Stare:    'Fox Stare.png',
+  Curious:  'Fox Curious.png',
+  Joy:      'Fox Joy.png',
+  Stern:    'Fox Stern.png',
+  Furious:  'Fox Furious.png',
+  Ouchy:    'Fox Ouchy.png',
+  Surprised:'Fox Suprised.png',
+};
+const MOODS = {
+  happy:   { high:[['Joy',0.45],['Surprised',0.35],['Curious',0.20]],    mid:[['Curious',0.50],['Joy',0.35],['Surprised',0.15]],     low:[['Curious',0.55],['Stare',0.25],['Joy',0.20]] },
+  calm:    { high:[['Curious',0.45],['Stern',0.35],['Stare',0.20]],      mid:[['Stare',0.50],['Curious',0.30],['Stern',0.20]],       low:[['Stare',0.65],['Curious',0.20],['Stern',0.15]] },
+  mad:     { high:[['Furious',0.55],['Ouchy',0.25],['Stern',0.20]],      mid:[['Stern',0.45],['Furious',0.35],['Ouchy',0.20]],       low:[['Stern',0.60],['Furious',0.25],['Ouchy',0.15]] },
+  shocked: { high:[['Surprised',0.55],['Ouchy',0.30],['Joy',0.15]],      mid:[['Surprised',0.40],['Ouchy',0.35],['Curious',0.25]],   low:[['Curious',0.50],['Surprised',0.30],['Ouchy',0.20]] },
+};
+
+const liveState = {
+  mood: 'happy',
+  lipSync: true,
+  syncStyle: 'ehh',
+  autoBlink: true,
+  blinkIntervalSec: 4,
+  greenScreen: false,
+  manualExpression: null,
+};
+
+let activeExpression = null;
+let blinkUntil = 0;
+let lastAutoBlinkTime = 0;
+let currentMouth = 'silent';
+
+const IMG = {};
+function imgUrl(file) { return ASSET_BASE + encodeURIComponent(file); }
+
+// ── BroadcastChannel ──────────────────────────────────────────────────────
+const ch = new BroadcastChannel('solquicks-live');
+ch.onmessage = ({ data }) => {
+  if (data.type === 'state' && data.state) {
+    Object.assign(liveState, data.state);
+    document.body.classList.toggle('green', liveState.greenScreen);
+  }
+};
+
+// ── Lip sync mouth tier ───────────────────────────────────────────────────
+function getMouthTier(vol) {
+  if (vol > 0.12)  return 'loud';
+  if (vol > 0.05)  return 'mid';
+  if (vol > 0.018) return 'quiet';
+  return 'silent';
+}
+function getMouthFile() {
+  const set = MOUTHS[liveState.syncStyle] || MOUTHS.ehh;
+  return set[currentMouth] || set.silent;
+}
+function getEyeFile() {
+  if (performance.now() < blinkUntil) return EYE_FILES.Blink;
+  if (liveState.manualExpression) return EYE_FILES[liveState.manualExpression] || EYE_FILES.Stare;
+  if (activeExpression) return EYE_FILES[activeExpression] || EYE_FILES.Stare;
+  return EYE_FILES.Stare;
+}
+
+// ── Auto-expression engine (same as index.html) ───────────────────────────
+const SILENCE_THRESH = 0.020, HIGH_THRESH = 0.11, MID_THRESH = 0.040;
+const MIN_ONSET_GAP = 1.2, LOOK_AHEAD_MS = 350;
+const MIN_SILENCE_FOR_BLINK = 0.8, MIN_BLINK_INTERVAL = 1.8, BLINK_MS = 120;
+
+let rngSeed = Date.now() & 0xFFFF;
+function autoRng() { rngSeed = (rngSeed * 1664525 + 1013904223) & 0xFFFFFFFF; return (rngSeed >>> 0) / 0xFFFFFFFF; }
+function pickFromPool(pool, avoid) {
+  const filtered = pool.filter(([e]) => e !== avoid);
+  const src = filtered.length ? filtered : pool;
+  const total = src.reduce((s, [, w]) => s + w, 0);
+  let r = autoRng() * total;
+  for (const [expr, w] of src) { r -= w; if (r <= 0) return expr; }
+  return src[0][0];
+}
+
+const engineState = {
+  ring:[0,0,0], ringIdx:0,
+  prevSmooth:0, prev2Smooth:0,
+  prevWasSpeech:false,
+  pendingOnset:null,
+  lastExpr:null,
+  lastOnsetTime:-MIN_ONSET_GAP,
+  lastBlinkTime:-MIN_BLINK_INTERVAL,
+  silenceStart:null,
+};
+
+function tickEngine(analyser, nowSec) {
+  const d = new Float32Array(analyser.fftSize);
+  analyser.getFloatTimeDomainData(d);
+  let sq = 0; for (let i = 0; i < d.length; i++) sq += d[i]*d[i];
+  const rawRms = Math.sqrt(sq / d.length);
+
+  if (liveState.lipSync) currentMouth = getMouthTier(rawRms);
+  else currentMouth = 'silent';
+
+  engineState.ring[engineState.ringIdx % 3] = rawRms; engineState.ringIdx++;
+  const smooth = (engineState.ring[0] + engineState.ring[1] + engineState.ring[2]) / 3;
+  const isSpeech = Math.max(smooth, engineState.prevSmooth, engineState.prev2Smooth) > SILENCE_THRESH;
+
+  if (engineState.pendingOnset) {
+    engineState.pendingOnset.rmsSum += smooth;
+    engineState.pendingOnset.rmsCount++;
+    if (nowSec >= engineState.pendingOnset.deadline) {
+      const avgRms = engineState.pendingOnset.rmsSum / engineState.pendingOnset.rmsCount;
+      const tier = avgRms > HIGH_THRESH ? 'high' : avgRms > MID_THRESH ? 'mid' : 'low';
+      const mood = MOODS[liveState.mood] || MOODS.happy;
+      const expr = pickFromPool(mood[tier], engineState.lastExpr);
+      const isOuchy = expr === 'Ouchy';
+      const lastWasOuchy = engineState.lastExpr === 'Ouchy';
+      if (!isOuchy && engineState.lastExpr !== null && !lastWasOuchy) {
+        blinkUntil = performance.now() + BLINK_MS;
+        engineState.lastBlinkTime = nowSec;
+        setTimeout(() => { activeExpression = expr; }, BLINK_MS);
+      } else {
+        activeExpression = expr;
+      }
+      engineState.lastExpr = expr;
+      engineState.pendingOnset = null;
+    }
+  }
+
+  if (!engineState.prevWasSpeech && isSpeech) {
+    if (nowSec - engineState.lastOnsetTime >= MIN_ONSET_GAP && !engineState.pendingOnset) {
+      engineState.lastOnsetTime = nowSec;
+      engineState.pendingOnset = { rmsSum: smooth, rmsCount: 1, deadline: nowSec + LOOK_AHEAD_MS/1000 };
+    }
+    engineState.silenceStart = null;
+  }
+
+  if (!isSpeech) {
+    if (engineState.silenceStart === null) engineState.silenceStart = nowSec;
+    const silDur = nowSec - engineState.silenceStart;
+    const sinceLastBlink = nowSec - engineState.lastBlinkTime;
+    if (silDur >= MIN_SILENCE_FOR_BLINK && sinceLastBlink >= MIN_BLINK_INTERVAL) {
+      blinkUntil = performance.now() + BLINK_MS;
+      engineState.lastBlinkTime = nowSec;
+      engineState.silenceStart = nowSec;
+    }
+  } else {
+    engineState.silenceStart = null;
+  }
+
+  engineState.prev2Smooth = engineState.prevSmooth;
+  engineState.prevSmooth = smooth;
+  engineState.prevWasSpeech = isSpeech;
+  return rawRms;
+}
+
+// ── Canvas render ─────────────────────────────────────────────────────────
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+function render() {
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  if (liveState.greenScreen) {
+    ctx.fillStyle = '#00ff00';
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  const baseFile = liveState.greenScreen ? BASE_GREEN : BASE;
+  const baseImg = IMG[baseFile];
+  if (baseImg) ctx.drawImage(baseImg, 0, 0, w, h);
+
+  const mouthImg = IMG[getMouthFile()];
+  if (mouthImg) ctx.drawImage(mouthImg, 0, 0, w, h);
+
+  const eyeImg = IMG[getEyeFile()];
+  if (eyeImg) ctx.drawImage(eyeImg, 0, 0, w, h);
+}
+
+// ── Mic + main loop ───────────────────────────────────────────────────────
+let analyser = null;
+
+async function startMic() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    const actx = new (window.AudioContext || window.webkitAudioContext)();
+    if (actx.state === 'suspended') await actx.resume();
+    analyser = actx.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0;
+    actx.createMediaStreamSource(stream).connect(analyser);
+  } catch (e) {
+    console.warn('[SolQuicks OBS] Mic unavailable —', e.message);
+  }
+}
+
+function loop() {
+  if (analyser) {
+    const nowSec = performance.now() / 1000;
+    tickEngine(analyser, nowSec);
+  }
+  if (liveState.autoBlink && analyser) {
+    const now = performance.now();
+    if (now - lastAutoBlinkTime > liveState.blinkIntervalSec * 1000) {
+      blinkUntil = Math.max(blinkUntil, now + BLINK_MS);
+      lastAutoBlinkTime = now;
+    }
+  }
+  render();
+  requestAnimationFrame(loop);
+}
+
+// ── Preload + boot ────────────────────────────────────────────────────────
+async function preload() {
+  const files = new Set();
+  files.add(BASE); files.add(BASE_GREEN);
+  Object.values(MOUTHS).forEach(m => Object.values(m).forEach(f => files.add(f)));
+  Object.values(EYE_FILES).forEach(f => files.add(f));
+  const list = [...files];
+  await Promise.all(list.map(file => new Promise(res => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = img.onerror = () => { IMG[file] = (img.complete && img.naturalWidth) ? img : null; res(); };
+    img.src = imgUrl(file);
+  })));
+}
+
+preload().then(() => {
+  startMic();
+  loop();
+});
+</script>
+</body>
+</html>
