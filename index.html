@@ -133,7 +133,7 @@
           <input type="checkbox" id="greenToggle"/>
         </div>
       </div>
-      <div class="help">Green Screen swaps the base layer to <strong style="color:var(--yellow)">Fox Green.png</strong> so OBS Chroma Key can cut out the background.</div>
+      <div class="help">Green Screen draws <strong style="color:var(--yellow)">Fox Green.png</strong> as the top layer so OBS Chroma Key can cut out the background.</div>
     </div>
 
     <!-- OBS Setup -->
@@ -293,9 +293,8 @@ function getEyeFile() {
 function drawFrame(ctx, w, h) {
   ctx.clearRect(0, 0, w, h);
 
-  // Base layer — Fox Green.png if green screen, otherwise Fox Base 1.png
-  const baseFile = state.greenScreen ? BASE_GREEN : BASE;
-  const baseImg = IMG[baseFile];
+  // Base layer (always Fox Base 1.png)
+  const baseImg = IMG[BASE];
   if (baseImg) ctx.drawImage(baseImg, 0, 0, w, h);
 
   // Mouth overlay (always draws — even on silence, since silence frame = closed mouth)
@@ -305,6 +304,12 @@ function drawFrame(ctx, w, h) {
   // Eye overlay
   const eyeImg = IMG[getEyeFile()];
   if (eyeImg) ctx.drawImage(eyeImg, 0, 0, w, h);
+
+  // Green screen overlay — top layer when enabled
+  if (state.greenScreen) {
+    const greenImg = IMG[BASE_GREEN];
+    if (greenImg) ctx.drawImage(greenImg, 0, 0, w, h);
+  }
 }
 
 function render() {
