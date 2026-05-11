@@ -1,0 +1,1157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>SolQuicks Live · OBS Studio</title>
+<meta name="description" content="Live avatar tool for the Most Famous Fox — lip sync, expressions, green screen for OBS."/>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦊</text></svg>"/>
+<style>
+/* ── DESIGN TOKENS ────────────────────────────────────────────────────── */
+:root {
+  --bg:           #0e0d0c;
+  --bg-elev:      #16140f;
+  --bg-panel:     #1c1814;
+  --line:         #2a241d;
+  --line-soft:    #221d17;
+  --ink:          #f4ebd9;
+  --ink-dim:      rgba(244,235,217,0.55);
+  --ink-faint:    rgba(244,235,217,0.32);
+  --fox:          #f06a1c;
+  --fox-hot:      #ff8534;
+  --fox-deep:     #b84510;
+  --cream:        #f0e3c2;
+  --red:          #c8341c;
+  --green:        #2ecc4c;
+  --shadow:       0 1px 0 rgba(255,255,255,0.04), 0 8px 24px rgba(0,0,0,0.5);
+
+  --f-display: 'Space Grotesk', 'Helvetica Neue', sans-serif;
+  --f-mono:    'JetBrains Mono', 'SFMono-Regular', Menlo, monospace;
+  --f-body:    'Space Grotesk', system-ui, sans-serif;
+}
+
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
+* { margin:0; padding:0; box-sizing:border-box; }
+html, body { width:100%; height:100%; overflow:hidden; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--f-body);
+  font-size: 14px;
+  letter-spacing: 0.01em;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Subtle dot grid texture in the background */
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background-image:
+    radial-gradient(circle at 25% 30%, rgba(240,106,28,0.06) 0, transparent 40%),
+    radial-gradient(circle at 80% 75%, rgba(240,106,28,0.04) 0, transparent 45%),
+    radial-gradient(rgba(255,255,255,0.025) 1px, transparent 1px);
+  background-size: auto, auto, 24px 24px;
+  background-position: center;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ── HEADER ───────────────────────────────────────────────────────────── */
+.header {
+  position: relative; z-index: 2;
+  height: 56px;
+  display: flex; align-items: center;
+  padding: 0 1.25rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-elev);
+  gap: 1rem;
+}
+.brand {
+  display:flex; align-items:center; gap:0.6rem;
+  font-family: var(--f-display);
+}
+.brand-mark {
+  width: 30px; height: 30px;
+  display: grid; place-items: center;
+  background: var(--fox);
+  border-radius: 6px;
+  font-size: 18px;
+  box-shadow: 0 2px 0 var(--fox-deep);
+}
+.brand-text { line-height: 1.1; }
+.brand-text strong {
+  font-weight: 700; font-size: 1.02rem;
+  letter-spacing: -0.01em;
+}
+.brand-text small {
+  display:block;
+  font-family: var(--f-mono);
+  font-size: 0.62rem;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  margin-top: 2px;
+}
+.h-spacer { flex: 1; }
+.h-status {
+  display: flex; align-items: center; gap: 0.5rem;
+  font-family: var(--f-mono);
+  font-size: 0.7rem;
+  color: var(--ink-dim);
+}
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-faint); }
+.dot.live { background: var(--green); box-shadow: 0 0 10px var(--green); animation: pulse 1.8s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+
+.btn-obs-enter {
+  background: var(--fox);
+  color: #1a0e05;
+  border: none;
+  font-family: var(--f-display);
+  font-weight: 700;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  padding: 0.55rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  box-shadow: 0 2px 0 var(--fox-deep), 0 4px 12px rgba(240,106,28,0.3);
+  transition: transform 0.1s, box-shadow 0.1s, background 0.15s;
+}
+.btn-obs-enter:hover { background: var(--fox-hot); transform: translateY(-1px); box-shadow: 0 3px 0 var(--fox-deep), 0 6px 16px rgba(240,106,28,0.4); }
+.btn-obs-enter:active { transform: translateY(1px); box-shadow: 0 1px 0 var(--fox-deep); }
+
+/* ── MAIN LAYOUT ──────────────────────────────────────────────────────── */
+.main {
+  position: relative; z-index: 1;
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  height: calc(100vh - 56px);
+  overflow: hidden;
+}
+
+/* ── STAGE (canvas area) ──────────────────────────────────────────────── */
+.stage {
+  display: flex; flex-direction: column;
+  background: var(--bg);
+  overflow: hidden;
+  position: relative;
+  border-right: 1px solid var(--line);
+}
+.stage-canvas {
+  flex: 1;
+  display: grid; place-items: center;
+  padding: 1.5rem;
+  position: relative;
+}
+.canvas-frame {
+  position: relative;
+  max-width: 100%; max-height: 100%;
+  aspect-ratio: 1 / 1;
+  width: min(100%, calc(100vh - 56px - 3rem - 80px));
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background:
+    linear-gradient(135deg, rgba(255,255,255,0.02) 0%, rgba(0,0,0,0.2) 100%),
+    repeating-conic-gradient(#1a1612 0% 25%, #15110e 0% 50%) 0 0 / 24px 24px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+.canvas-frame.green-bg {
+  background: #00ff00;
+}
+#previewCanvas {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  display: block;
+}
+.stage-foot {
+  border-top: 1px solid var(--line);
+  background: var(--bg-elev);
+  padding: 0.75rem 1.25rem;
+  display: flex; align-items: center; gap: 1rem;
+  font-family: var(--f-mono);
+  font-size: 0.7rem;
+  color: var(--ink-dim);
+  min-height: 50px;
+  flex-wrap: wrap;
+}
+.foot-block { display: flex; align-items: center; gap: 0.5rem; }
+.foot-label { color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.12em; font-size: 0.6rem; }
+.foot-val { color: var(--ink); }
+
+#micMeter {
+  width: 120px; height: 6px;
+  background: var(--line);
+  border-radius: 3px;
+  overflow: hidden;
+  position: relative;
+}
+#micFill {
+  height: 100%; width: 0%;
+  background: linear-gradient(90deg, var(--green), var(--fox), var(--red));
+  transition: width 0.05s linear;
+}
+
+.btn-mic {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  font-family: var(--f-display);
+  font-weight: 600;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 0.4rem 0.8rem;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-mic:hover { border-color: var(--fox); color: var(--fox); }
+.btn-mic.live { background: var(--green); color: #02180a; border-color: var(--green); }
+
+/* ── CONTROLS PANEL ───────────────────────────────────────────────────── */
+.panel {
+  background: var(--bg-panel);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.panel::-webkit-scrollbar { width: 6px; }
+.panel::-webkit-scrollbar-track { background: transparent; }
+.panel::-webkit-scrollbar-thumb { background: var(--line); border-radius: 3px; }
+.panel::-webkit-scrollbar-thumb:hover { background: var(--fox-deep); }
+
+.group {
+  border-bottom: 1px solid var(--line);
+  padding: 1rem 1.25rem;
+}
+.group-hd {
+  display: flex; align-items: center; gap: 0.55rem;
+  font-family: var(--f-display);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--ink-dim);
+  margin-bottom: 0.75rem;
+}
+.group-hd::before {
+  content: '';
+  width: 4px; height: 14px;
+  background: var(--fox);
+  border-radius: 1px;
+}
+
+/* Row layout */
+.row {
+  display: flex; align-items: center; gap: 0.6rem;
+  margin-bottom: 0.6rem;
+}
+.row:last-child { margin-bottom: 0; }
+.row label {
+  flex: 1;
+  font-family: var(--f-body);
+  font-size: 0.82rem;
+  color: var(--ink);
+}
+.row .val {
+  font-family: var(--f-mono);
+  font-size: 0.7rem;
+  color: var(--fox);
+  min-width: 32px;
+  text-align: right;
+}
+
+/* Toggle switch */
+.switch {
+  position: relative;
+  width: 38px; height: 22px;
+  background: var(--line);
+  border-radius: 11px;
+  cursor: pointer;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+.switch::after {
+  content: '';
+  position: absolute;
+  top: 2px; left: 2px;
+  width: 18px; height: 18px;
+  background: var(--ink);
+  border-radius: 50%;
+  transition: left 0.15s, background 0.15s;
+}
+.switch input { display: none; }
+.switch.on { background: var(--fox); }
+.switch.on::after { left: 18px; background: #fff; }
+
+/* Select */
+select {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font-family: var(--f-body);
+  font-size: 0.82rem;
+  padding: 0.42rem 0.6rem;
+  border-radius: 5px;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s;
+}
+select:hover, select:focus { border-color: var(--fox); }
+
+/* Range slider */
+input[type=range] {
+  flex: 1;
+  appearance: none;
+  background: transparent;
+  height: 20px;
+  cursor: pointer;
+}
+input[type=range]::-webkit-slider-runnable-track {
+  height: 4px; background: var(--line); border-radius: 2px;
+}
+input[type=range]::-moz-range-track {
+  height: 4px; background: var(--line); border-radius: 2px;
+}
+input[type=range]::-webkit-slider-thumb {
+  appearance: none;
+  width: 16px; height: 16px;
+  background: var(--fox);
+  border-radius: 50%;
+  margin-top: -6px;
+  border: 2px solid var(--bg-panel);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+}
+input[type=range]::-moz-range-thumb {
+  width: 16px; height: 16px;
+  background: var(--fox);
+  border-radius: 50%;
+  border: 2px solid var(--bg-panel);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+}
+
+/* Expression test grid */
+.test-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-top: 0.5rem;
+}
+.test-btn {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  color: var(--ink-dim);
+  font-family: var(--f-mono);
+  font-size: 0.62rem;
+  padding: 0.55rem 0.2rem;
+  border-radius: 4px;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  transition: all 0.12s;
+}
+.test-btn:hover { border-color: var(--fox); color: var(--fox); }
+.test-btn.active { background: var(--fox); color: #1a0e05; border-color: var(--fox); }
+
+/* Status indicator text */
+.indicator {
+  font-family: var(--f-mono);
+  font-size: 0.66rem;
+  color: var(--ink-faint);
+  padding: 0.4rem 0;
+  min-height: 1.6em;
+  line-height: 1.4;
+}
+.indicator strong { color: var(--fox); font-weight: 500; }
+
+/* Help blurb */
+.help {
+  font-family: var(--f-mono);
+  font-size: 0.62rem;
+  color: var(--ink-faint);
+  line-height: 1.6;
+  padding: 0.4rem 0;
+}
+.help kbd {
+  display: inline-block;
+  font-family: var(--f-mono);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  color: var(--ink);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.6rem;
+}
+
+/* OBS URL copy */
+.obs-url-row {
+  display: flex; gap: 6px; margin-top: 0.5rem;
+}
+.obs-url-row input {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font-family: var(--f-mono);
+  font-size: 0.66rem;
+  padding: 0.42rem 0.5rem;
+  border-radius: 4px;
+  outline: none;
+}
+.obs-url-row button {
+  background: var(--fox);
+  color: #1a0e05;
+  border: none;
+  font-family: var(--f-mono);
+  font-size: 0.62rem;
+  padding: 0 0.7rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.obs-url-row button:hover { background: var(--fox-hot); }
+
+/* ── OBS MODE OVERLAY ─────────────────────────────────────────────────── */
+.obs-mode {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+}
+.obs-mode.green-bg { background: #00ff00; }
+body.obs-active .obs-mode { display: flex; }
+body.obs-active .header,
+body.obs-active .main { display: none; }
+
+.obs-canvas-wrap {
+  width: 100vmin;
+  height: 100vmin;
+  position: relative;
+}
+#obsCanvas {
+  width: 100%; height: 100%;
+  display: block;
+}
+
+/* Faded exit button — top-left corner */
+.obs-exit {
+  position: fixed;
+  top: 12px; left: 12px;
+  z-index: 101;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  opacity: 0.18;
+  transition: opacity 0.2s;
+}
+.obs-exit:hover { opacity: 1; }
+.obs-exit button {
+  background: rgba(20,16,12,0.85);
+  border: 1px solid rgba(244,235,217,0.2);
+  color: var(--ink);
+  font-family: var(--f-mono);
+  font-size: 0.65rem;
+  padding: 0.5rem 0.8rem;
+  border-radius: 5px;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: all 0.12s;
+}
+.obs-exit button:hover {
+  background: rgba(240,106,28,0.9);
+  color: #1a0e05;
+  border-color: var(--fox);
+}
+.obs-exit button.pause.paused {
+  background: rgba(200,52,28,0.85);
+  border-color: var(--red);
+  color: #fff;
+}
+
+/* ── LOADER ───────────────────────────────────────────────────────────── */
+.loader {
+  position: fixed; inset: 0;
+  background: var(--bg);
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  transition: opacity 0.3s;
+}
+.loader.gone { opacity: 0; pointer-events: none; }
+.loader-mark {
+  font-size: 3rem;
+  animation: spin 2s linear infinite;
+}
+@keyframes spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+.loader-text {
+  font-family: var(--f-mono);
+  color: var(--ink-dim);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+}
+.loader-bar {
+  width: 200px; height: 4px;
+  background: var(--line);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.loader-fill {
+  height: 100%; width: 0%;
+  background: var(--fox);
+  transition: width 0.15s;
+}
+
+/* ── RESPONSIVE ───────────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .main { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
+  .stage { border-right: none; border-bottom: 1px solid var(--line); }
+  .panel { max-height: 50vh; }
+  .canvas-frame { width: min(70vw, 70vh); }
+}
+</style>
+</head>
+<body>
+
+<!-- ═════════════ LOADER ═════════════ -->
+<div class="loader" id="loader">
+  <div class="loader-mark">🦊</div>
+  <div class="loader-text">Loading SolQuicks</div>
+  <div class="loader-bar"><div class="loader-fill" id="loaderFill"></div></div>
+  <div class="loader-text" id="loaderStat" style="font-size:0.65rem;letter-spacing:0.1em;">0 / 0</div>
+</div>
+
+<!-- ═════════════ HEADER ═════════════ -->
+<header class="header">
+  <div class="brand">
+    <div class="brand-mark">🦊</div>
+    <div class="brand-text">
+      <strong>SolQuicks Live</strong>
+      <small>OBS Avatar Studio</small>
+    </div>
+  </div>
+  <div class="h-spacer"></div>
+  <div class="h-status">
+    <div class="dot" id="micDot"></div>
+    <span id="micStatusText">Mic offline</span>
+  </div>
+  <button class="btn-obs-enter" onclick="enterObsMode()">▶ Enter OBS Mode</button>
+</header>
+
+<!-- ═════════════ MAIN LAYOUT ═════════════ -->
+<main class="main">
+
+  <!-- Stage -->
+  <div class="stage">
+    <div class="stage-canvas">
+      <div class="canvas-frame" id="canvasFrame">
+        <canvas id="previewCanvas" width="1000" height="1000"></canvas>
+      </div>
+    </div>
+    <div class="stage-foot">
+      <div class="foot-block">
+        <button class="btn-mic" id="micBtn" onclick="toggleMic()">🎤 Start Mic</button>
+      </div>
+      <div class="foot-block">
+        <span class="foot-label">Level</span>
+        <div id="micMeter"><div id="micFill"></div></div>
+      </div>
+      <div class="foot-block">
+        <span class="foot-label">Expression</span>
+        <span class="foot-val" id="footExpr">—</span>
+      </div>
+      <div class="foot-block">
+        <span class="foot-label">Mouth</span>
+        <span class="foot-val" id="footMouth">Mmm</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <aside class="panel">
+
+    <!-- Auto Expressions -->
+    <div class="group">
+      <div class="group-hd">Auto Expressions</div>
+      <div class="row">
+        <label>Mood</label>
+        <select id="moodSelect" onchange="onMoodChange()">
+          <option value="happy">😄 Happy</option>
+          <option value="calm">😌 Calm</option>
+          <option value="mad">😡 Mad</option>
+          <option value="shocked">😲 Shocked</option>
+        </select>
+      </div>
+      <div class="indicator" id="exprIndicator">Start mic — expressions fire automatically as you speak</div>
+    </div>
+
+    <!-- Lip Sync -->
+    <div class="group">
+      <div class="group-hd">Lip Sync</div>
+      <div class="row">
+        <label>Auto Lip Sync</label>
+        <div class="switch on" id="lipSyncSwitch" onclick="toggleSwitch('lipSync')">
+          <input type="checkbox" id="lipSyncToggle" checked/>
+        </div>
+      </div>
+      <div class="row">
+        <label>Style</label>
+        <select id="syncStyle">
+          <option value="ehh">Default (Ehh)</option>
+          <option value="smile">Smiley (Smile)</option>
+          <option value="sss">Hissy (Sss)</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Auto Blink -->
+    <div class="group">
+      <div class="group-hd">Auto Blink</div>
+      <div class="row">
+        <label>Auto Blink</label>
+        <div class="switch on" id="blinkSwitch" onclick="toggleSwitch('blink')">
+          <input type="checkbox" id="blinkToggle" checked/>
+        </div>
+      </div>
+      <div class="row">
+        <label>Interval</label>
+        <input type="range" id="blinkSlider" min="1" max="12" step="0.5" value="4" oninput="onBlinkSlider()"/>
+        <span class="val" id="blinkVal">4s</span>
+      </div>
+    </div>
+
+    <!-- Manual Test -->
+    <div class="group">
+      <div class="group-hd">Test Expressions</div>
+      <div class="test-grid" id="testGrid"></div>
+      <div class="indicator" style="margin-top:0.3rem;">Tap once to set, again to clear. Auto-mode overrides.</div>
+    </div>
+
+    <!-- Background -->
+    <div class="group">
+      <div class="group-hd">Background</div>
+      <div class="row">
+        <label>Green Screen</label>
+        <div class="switch" id="greenSwitch" onclick="toggleSwitch('green')">
+          <input type="checkbox" id="greenToggle"/>
+        </div>
+      </div>
+      <div class="help">Green Screen swaps the base for <strong style="color:var(--fox)">Fox Green.png</strong> and tints the OBS-mode background <span style="color:#0f0;">#00FF00</span> for OBS Chroma Key.</div>
+    </div>
+
+    <!-- OBS Setup -->
+    <div class="group">
+      <div class="group-hd">OBS Setup</div>
+      <div class="help">
+        <strong style="color:var(--ink);">Window Capture (easy):</strong><br/>
+        1. Click <kbd>▶ Enter OBS Mode</kbd> above<br/>
+        2. In OBS: <kbd>+ Source</kbd> → <kbd>Window Capture</kbd> → pick this browser<br/>
+        3. Add Chroma Key filter if green is on<br/>
+      </div>
+      <div class="help" style="margin-top:0.5rem;">
+        <strong style="color:var(--ink);">Browser Source (advanced):</strong>
+        <div class="obs-url-row">
+          <input id="obsUrl" readonly value=""/>
+          <button onclick="copyObsUrl()">Copy</button>
+        </div>
+      </div>
+    </div>
+
+  </aside>
+</main>
+
+<!-- ═════════════ OBS MODE OVERLAY ═════════════ -->
+<div class="obs-mode" id="obsMode">
+  <div class="obs-canvas-wrap">
+    <canvas id="obsCanvas" width="1000" height="1000"></canvas>
+  </div>
+</div>
+<div class="obs-exit" id="obsExit" style="display:none;">
+  <button onclick="exitObsMode()">× Exit OBS Mode</button>
+  <button class="pause" id="pauseBtn" onclick="togglePause()">⏸ Pause Mic</button>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════
+//  SolQuicks Live — single-file OBS avatar studio
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── ASSETS ────────────────────────────────────────────────────────────────
+// All PNGs live in the ./assets/ folder. Filenames match the screenshot exactly.
+const ASSET_BASE = './assets/';
+
+const BASE       = 'Fox Base 1.png';
+const BASE_GREEN = 'Fox Green.png';
+
+// Mouth shapes (lip-sync volume tiers, mapped to available fox mouths)
+const MOUTHS = {
+  // Default style
+  ehh:   { silent:'Fox Mmm.png',   quiet:'Fox Eee.png',  mid:'Fox Ehh.png',   loud:'Fox Ahh.png' },
+  smile: { silent:'Fox Smile.png', quiet:'Fox Eee.png',  mid:'Fox Smile.png', loud:'Fox Ahh.png' },
+  sss:   { silent:'Fox Mmm.png',   quiet:'Fox Sss.png',  mid:'Fox Rrr.png',   loud:'Fox Ahh.png' },
+};
+
+// Eye expressions (everything that goes in the EYES slot)
+const EYE_FILES = {
+  Blink:    'Fox Blink.png',
+  Stare:    'Fox Stare.png',
+  Curious:  'Fox Curious.png',
+  Joy:      'Fox Joy.png',
+  Stern:    'Fox Stern.png',
+  Furious:  'Fox Furious.png',
+  Ouchy:    'Fox Ouchy.png',
+  Surprised:'Fox Suprised.png',  // note: original filename has typo "Suprised"
+};
+
+// Mood pools — same structure as BHB Live, ported to fox expressions
+const MOODS = {
+  happy:   {
+    high: [['Joy',0.45], ['Surprised',0.35], ['Curious',0.20]],
+    mid:  [['Curious',0.50], ['Joy',0.35], ['Surprised',0.15]],
+    low:  [['Curious',0.55], ['Stare',0.25], ['Joy',0.20]],
+  },
+  calm:    {
+    high: [['Curious',0.45], ['Stern',0.35], ['Stare',0.20]],
+    mid:  [['Stare',0.50], ['Curious',0.30], ['Stern',0.20]],
+    low:  [['Stare',0.65], ['Curious',0.20], ['Stern',0.15]],
+  },
+  mad:     {
+    high: [['Furious',0.55], ['Ouchy',0.25], ['Stern',0.20]],
+    mid:  [['Stern',0.45], ['Furious',0.35], ['Ouchy',0.20]],
+    low:  [['Stern',0.60], ['Furious',0.25], ['Ouchy',0.15]],
+  },
+  shocked: {
+    high: [['Surprised',0.55], ['Ouchy',0.30], ['Joy',0.15]],
+    mid:  [['Surprised',0.40], ['Ouchy',0.35], ['Curious',0.25]],
+    low:  [['Curious',0.50], ['Surprised',0.30], ['Ouchy',0.20]],
+  },
+};
+
+// ── STATE ─────────────────────────────────────────────────────────────────
+const state = {
+  mood: 'happy',
+  lipSync: true,
+  syncStyle: 'ehh',
+  autoBlink: true,
+  blinkIntervalSec: 4,
+  greenScreen: false,
+  manualExpression: null,   // null = auto, otherwise eye key like 'Joy'
+  micPaused: false,
+};
+
+let activeExpression = null;   // current auto-fired expression (eye key)
+let blinkUntil = 0;            // performance.now() deadline for blink frame
+let lastAutoBlinkTime = 0;     // for the auto-blink timer
+let currentMouth = 'silent';   // tier key from getMouthTier()
+
+// ── IMAGE CACHE ───────────────────────────────────────────────────────────
+const IMG = {};
+function imgUrl(file) { return ASSET_BASE + encodeURIComponent(file); }
+
+function preload(onProgress) {
+  // Build the full list of files we need
+  const files = new Set();
+  files.add(BASE);
+  files.add(BASE_GREEN);
+  Object.values(MOUTHS).forEach(m => Object.values(m).forEach(f => files.add(f)));
+  Object.values(EYE_FILES).forEach(f => files.add(f));
+
+  const list = [...files];
+  let done = 0;
+  return Promise.all(list.map(file => new Promise(res => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = img.onerror = () => {
+      IMG[file] = (img.complete && img.naturalWidth) ? img : null;
+      done++;
+      onProgress(done, list.length, file);
+      res();
+    };
+    img.src = imgUrl(file);
+  })));
+}
+
+// ── CANVAS RENDER ─────────────────────────────────────────────────────────
+const previewCanvas = document.getElementById('previewCanvas');
+const previewCtx = previewCanvas.getContext('2d');
+const obsCanvas = document.getElementById('obsCanvas');
+const obsCtx = obsCanvas.getContext('2d');
+
+function getMouthFile() {
+  const set = MOUTHS[state.syncStyle] || MOUTHS.ehh;
+  return set[currentMouth] || set.silent;
+}
+
+function getEyeFile() {
+  // Blink overrides everything while active
+  if (performance.now() < blinkUntil) return EYE_FILES.Blink;
+  // Manual override wins over auto
+  if (state.manualExpression) return EYE_FILES[state.manualExpression] || EYE_FILES.Stare;
+  // Auto expression
+  if (activeExpression) return EYE_FILES[activeExpression] || EYE_FILES.Stare;
+  // Default idle
+  return EYE_FILES.Stare;
+}
+
+function drawFrame(ctx, w, h) {
+  ctx.clearRect(0, 0, w, h);
+
+  // Optional green fill behind everything when green-screen mode is on
+  if (state.greenScreen) {
+    ctx.fillStyle = '#00ff00';
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  // Base layer — Fox Green.png if green screen, otherwise Fox Base 1.png
+  const baseFile = state.greenScreen ? BASE_GREEN : BASE;
+  const baseImg = IMG[baseFile];
+  if (baseImg) ctx.drawImage(baseImg, 0, 0, w, h);
+
+  // Mouth overlay (always draws — even on silence, since silence frame = closed mouth)
+  const mouthImg = IMG[getMouthFile()];
+  if (mouthImg) ctx.drawImage(mouthImg, 0, 0, w, h);
+
+  // Eye overlay
+  const eyeImg = IMG[getEyeFile()];
+  if (eyeImg) ctx.drawImage(eyeImg, 0, 0, w, h);
+}
+
+function render() {
+  drawFrame(previewCtx, previewCanvas.width, previewCanvas.height);
+  if (document.body.classList.contains('obs-active')) {
+    drawFrame(obsCtx, obsCanvas.width, obsCanvas.height);
+  }
+}
+
+// ── LIP SYNC ──────────────────────────────────────────────────────────────
+function getMouthTier(vol) {
+  if (vol > 0.12)  return 'loud';
+  if (vol > 0.05)  return 'mid';
+  if (vol > 0.018) return 'quiet';
+  return 'silent';
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  AUTO-EXPRESSION ENGINE — same algorithm as BHB Live / Animator
+//  - 3-frame rolling RMS smoothing
+//  - speech = max(cur, prev, prev2) > SILENCE_THRESH
+//  - on onset: look-ahead 350ms, classify high/mid/low, pick weighted expression
+//  - pre-expression blink 120ms BEFORE the new expression (except first / after Ouchy)
+//  - idle silence blinks: silence ≥ 0.8s AND ≥ 1.8s since last blink
+// ═══════════════════════════════════════════════════════════════════════════
+
+const SILENCE_THRESH = 0.020, HIGH_THRESH = 0.11, MID_THRESH = 0.040;
+const MIN_ONSET_GAP = 1.2, LOOK_AHEAD_MS = 350;
+const MIN_SILENCE_FOR_BLINK = 0.8, MIN_BLINK_INTERVAL = 1.8, BLINK_MS = 120;
+
+let rngSeed = Date.now() & 0xFFFF;
+function autoRng() {
+  rngSeed = (rngSeed * 1664525 + 1013904223) & 0xFFFFFFFF;
+  return (rngSeed >>> 0) / 0xFFFFFFFF;
+}
+function pickFromPool(pool, avoid) {
+  const filtered = pool.filter(([e]) => e !== avoid);
+  const src = filtered.length ? filtered : pool;
+  const total = src.reduce((s, [, w]) => s + w, 0);
+  let r = autoRng() * total;
+  for (const [expr, w] of src) { r -= w; if (r <= 0) return expr; }
+  return src[0][0];
+}
+
+const engineState = {
+  ring: [0,0,0], ringIdx: 0,
+  prevSmooth: 0, prev2Smooth: 0,
+  prevWasSpeech: false,
+  pendingOnset: null,
+  lastExpr: null,
+  lastOnsetTime: -MIN_ONSET_GAP,
+  lastBlinkTime: -MIN_BLINK_INTERVAL,
+  silenceStart: null,
+};
+
+function tickEngine(analyser, nowSec) {
+  const d = new Float32Array(analyser.fftSize);
+  analyser.getFloatTimeDomainData(d);
+  let sq = 0;
+  for (let i = 0; i < d.length; i++) sq += d[i] * d[i];
+  const rawRms = Math.sqrt(sq / d.length);
+
+  // Update mouth tier for lip-sync
+  if (state.lipSync) currentMouth = getMouthTier(rawRms);
+  else currentMouth = 'silent';
+
+  // 3-frame rolling average
+  engineState.ring[engineState.ringIdx % 3] = rawRms;
+  engineState.ringIdx++;
+  const smooth = (engineState.ring[0] + engineState.ring[1] + engineState.ring[2]) / 3;
+
+  // speech = max(cur, prev, prev2) > threshold
+  const isSpeech = Math.max(smooth, engineState.prevSmooth, engineState.prev2Smooth) > SILENCE_THRESH;
+
+  // Look-ahead window: accumulate post-onset RMS, then classify + fire
+  if (engineState.pendingOnset) {
+    engineState.pendingOnset.rmsSum += smooth;
+    engineState.pendingOnset.rmsCount++;
+    if (nowSec >= engineState.pendingOnset.deadline) {
+      const avgRms = engineState.pendingOnset.rmsSum / engineState.pendingOnset.rmsCount;
+      const tier = avgRms > HIGH_THRESH ? 'high' : avgRms > MID_THRESH ? 'mid' : 'low';
+      const mood = MOODS[state.mood] || MOODS.happy;
+      const expr = pickFromPool(mood[tier], engineState.lastExpr);
+      const isOuchy = expr === 'Ouchy';
+      const lastWasOuchy = engineState.lastExpr === 'Ouchy';
+
+      // Pre-expression blink (skip on first expression, on Ouchy, or after Ouchy)
+      if (!isOuchy && engineState.lastExpr !== null && !lastWasOuchy) {
+        blinkUntil = performance.now() + BLINK_MS;
+        engineState.lastBlinkTime = nowSec;
+        setTimeout(() => fireExpression(expr), BLINK_MS);
+      } else {
+        fireExpression(expr);
+      }
+      engineState.lastExpr = expr;
+      engineState.pendingOnset = null;
+    }
+  }
+
+  // Onset detect
+  if (!engineState.prevWasSpeech && isSpeech) {
+    if (nowSec - engineState.lastOnsetTime >= MIN_ONSET_GAP && !engineState.pendingOnset) {
+      engineState.lastOnsetTime = nowSec;
+      engineState.pendingOnset = {
+        rmsSum: smooth,
+        rmsCount: 1,
+        deadline: nowSec + LOOK_AHEAD_MS / 1000,
+      };
+    }
+    engineState.silenceStart = null;
+  }
+
+  // Idle silence blinks
+  if (!isSpeech) {
+    if (engineState.silenceStart === null) engineState.silenceStart = nowSec;
+    const silDur = nowSec - engineState.silenceStart;
+    const sinceLastBlink = nowSec - engineState.lastBlinkTime;
+    if (silDur >= MIN_SILENCE_FOR_BLINK && sinceLastBlink >= MIN_BLINK_INTERVAL) {
+      blinkUntil = performance.now() + BLINK_MS;
+      engineState.lastBlinkTime = nowSec;
+      engineState.silenceStart = nowSec;
+    }
+  } else {
+    engineState.silenceStart = null;
+  }
+
+  engineState.prev2Smooth = engineState.prevSmooth;
+  engineState.prevSmooth = smooth;
+  engineState.prevWasSpeech = isSpeech;
+  return rawRms;
+}
+
+function fireExpression(exprKey) {
+  activeExpression = exprKey;
+  state.manualExpression = null;        // auto overrides manual
+  updateTestGridActive();
+  document.getElementById('exprIndicator').innerHTML = `Auto: <strong>${exprKey}</strong>`;
+  document.getElementById('footExpr').textContent = exprKey;
+  broadcastState();
+}
+
+// ── MIC ───────────────────────────────────────────────────────────────────
+let analyser = null;
+let audioCtx = null;
+let micStream = null;
+
+async function toggleMic() {
+  if (micStream) {
+    stopMic();
+    return;
+  }
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') await audioCtx.resume();
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0;
+    audioCtx.createMediaStreamSource(micStream).connect(analyser);
+    document.getElementById('micBtn').textContent = '⏹ Stop Mic';
+    document.getElementById('micBtn').classList.add('live');
+    document.getElementById('micDot').classList.add('live');
+    document.getElementById('micStatusText').textContent = 'Listening';
+    document.getElementById('exprIndicator').innerHTML = '🎤 Listening — speak to trigger expressions';
+  } catch (e) {
+    document.getElementById('exprIndicator').textContent = 'Mic denied. Check your browser permissions.';
+  }
+}
+
+function stopMic() {
+  if (micStream) micStream.getTracks().forEach(t => t.stop());
+  if (audioCtx) audioCtx.close();
+  micStream = null; audioCtx = null; analyser = null;
+  document.getElementById('micBtn').textContent = '🎤 Start Mic';
+  document.getElementById('micBtn').classList.remove('live');
+  document.getElementById('micDot').classList.remove('live');
+  document.getElementById('micStatusText').textContent = 'Mic offline';
+  document.getElementById('micFill').style.width = '0%';
+  currentMouth = 'silent';
+}
+
+function togglePause() {
+  state.micPaused = !state.micPaused;
+  document.getElementById('pauseBtn').textContent = state.micPaused ? '▶ Resume' : '⏸ Pause Mic';
+  document.getElementById('pauseBtn').classList.toggle('paused', state.micPaused);
+}
+
+// ── MAIN LOOP ─────────────────────────────────────────────────────────────
+function loop() {
+  if (analyser && !state.micPaused) {
+    const nowSec = performance.now() / 1000;
+    const rawRms = tickEngine(analyser, nowSec);
+    document.getElementById('micFill').style.width = Math.min(100, rawRms * 800) + '%';
+    document.getElementById('footMouth').textContent =
+      (state.lipSync ? currentMouth.charAt(0).toUpperCase() + currentMouth.slice(1) : 'Off');
+  }
+
+  // Auto-blink (independent of speech, separate timer)
+  if (state.autoBlink && analyser) {
+    const now = performance.now();
+    if (now - lastAutoBlinkTime > state.blinkIntervalSec * 1000) {
+      blinkUntil = Math.max(blinkUntil, now + BLINK_MS);
+      lastAutoBlinkTime = now;
+    }
+  }
+
+  render();
+  requestAnimationFrame(loop);
+}
+
+// ── UI HANDLERS ───────────────────────────────────────────────────────────
+function toggleSwitch(key) {
+  if (key === 'lipSync') {
+    state.lipSync = !state.lipSync;
+    document.getElementById('lipSyncSwitch').classList.toggle('on', state.lipSync);
+    document.getElementById('lipSyncToggle').checked = state.lipSync;
+  } else if (key === 'blink') {
+    state.autoBlink = !state.autoBlink;
+    document.getElementById('blinkSwitch').classList.toggle('on', state.autoBlink);
+    document.getElementById('blinkToggle').checked = state.autoBlink;
+  } else if (key === 'green') {
+    state.greenScreen = !state.greenScreen;
+    document.getElementById('greenSwitch').classList.toggle('on', state.greenScreen);
+    document.getElementById('greenToggle').checked = state.greenScreen;
+    document.getElementById('canvasFrame').classList.toggle('green-bg', state.greenScreen);
+    document.getElementById('obsMode').classList.toggle('green-bg', state.greenScreen);
+  }
+  broadcastState();
+}
+
+function onMoodChange() {
+  state.mood = document.getElementById('moodSelect').value;
+  engineState.lastExpr = null;
+  activeExpression = null;
+  document.getElementById('exprIndicator').innerHTML = `Mood: <strong>${state.mood}</strong> — speak to update`;
+  broadcastState();
+}
+
+function onBlinkSlider() {
+  state.blinkIntervalSec = parseFloat(document.getElementById('blinkSlider').value);
+  document.getElementById('blinkVal').textContent = state.blinkIntervalSec + 's';
+  broadcastState();
+}
+
+document.getElementById('syncStyle').addEventListener('change', e => {
+  state.syncStyle = e.target.value;
+  broadcastState();
+});
+
+// Test expression grid
+function buildTestGrid() {
+  const grid = document.getElementById('testGrid');
+  const keys = Object.keys(EYE_FILES).filter(k => k !== 'Blink');
+  grid.innerHTML = keys.map(k => `<button class="test-btn" data-expr="${k}" onclick="manualSet('${k}')">${k}</button>`).join('');
+}
+function manualSet(key) {
+  if (state.manualExpression === key) {
+    state.manualExpression = null;
+    activeExpression = null;
+    document.getElementById('exprIndicator').innerHTML = 'Cleared — auto-mode resumed';
+    document.getElementById('footExpr').textContent = '—';
+  } else {
+    state.manualExpression = key;
+    activeExpression = null;
+    document.getElementById('exprIndicator').innerHTML = `Manual: <strong>${key}</strong>`;
+    document.getElementById('footExpr').textContent = key;
+  }
+  updateTestGridActive();
+  broadcastState();
+}
+function updateTestGridActive() {
+  const active = state.manualExpression || activeExpression;
+  document.querySelectorAll('.test-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.expr === active);
+  });
+}
+
+// ── OBS MODE ──────────────────────────────────────────────────────────────
+function enterObsMode() {
+  document.body.classList.add('obs-active');
+  document.getElementById('obsExit').style.display = 'flex';
+  // Auto-start mic if not running
+  if (!micStream) toggleMic();
+}
+function exitObsMode() {
+  document.body.classList.remove('obs-active');
+  document.getElementById('obsExit').style.display = 'none';
+}
+
+// Keyboard shortcut: Esc to exit OBS mode
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && document.body.classList.contains('obs-active')) exitObsMode();
+});
+
+// ── OBS BROWSER SOURCE URL ────────────────────────────────────────────────
+const OBS_URL = window.location.href.replace(/index\.html?(\?.*)?$/i, '').replace(/\/$/, '') + '/obs.html';
+document.getElementById('obsUrl').value = OBS_URL;
+function copyObsUrl() {
+  navigator.clipboard.writeText(OBS_URL).then(() => {
+    const btn = event.target;
+    const old = btn.textContent;
+    btn.textContent = '✓';
+    setTimeout(() => btn.textContent = old, 1500);
+  });
+}
+
+// ── BROADCAST CHANNEL (for obs.html Browser Source) ───────────────────────
+const ch = new BroadcastChannel('solquicks-live');
+function broadcastState() {
+  ch.postMessage({ type: 'state', state: { ...state, activeExpression } });
+}
+// Periodic broadcast in case obs.html starts after us
+setInterval(broadcastState, 2000);
+window.addEventListener('focus', broadcastState);
+
+// ── BOOT ──────────────────────────────────────────────────────────────────
+buildTestGrid();
+preload((done, total, file) => {
+  document.getElementById('loaderFill').style.width = (done / total * 100) + '%';
+  document.getElementById('loaderStat').textContent = `${done} / ${total}`;
+}).then(() => {
+  setTimeout(() => document.getElementById('loader').classList.add('gone'), 200);
+  loop();
+});
+</script>
+</body>
+</html>
